@@ -1,0 +1,21 @@
+{
+  "type": "travel_booking",
+  "tenant": "global",
+  "displayName": "Reserva de Viaje",
+  "propertiesSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["booking_type"],
+    "properties": {
+      "booking_type": {
+        "type": "string",
+        "enum": ["flight", "hotel", "car", "restaurant", "other"]
+      },
+      "provider": { "type": "string" },
+      "confirmation": { "type": "string" },
+      "starts_at": { "type": "string", "format": "date-time" },
+      "ends_at": { "type": "string", "format": "date-time" }
+    }
+  },
+  "allowedRelationships": []
+}

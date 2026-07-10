@@ -47,7 +47,7 @@ POST `/ingest/api/unstructured` (multipart):
 
 - `targetType`, `tenantId` (requeridos).
 - `text` (pegado) o `file` (.txt/.pdf).
-- `maxEntities` (default 5, tope 10).
+- `maxEntities` (default **10**; tope duro `min(INGEST_AI_MAX_ENTITIES ?? 25, INGEST_BATCH_LIMIT ?? 50)`).
 
 Usa OpenRouter (`OPENROUTER_API_KEY`, `LLM_MODEL`). El system prompt exige
 `response_format: json_object` con un envelope `{ "thinking": "<CoT>", "entities": [...] }`
@@ -103,6 +103,42 @@ Implementa la *intención* del draft de apéndice sobre el canon R1 + Appendix-0
 - **`ume-standard` no modificado**; el pack local no toca el gate cert.
 
 Plan SoT: `/root/.local/share/kilo/plans/1783655801474-ume-ingest-ai-expansion.md`.
+
+## Recursive depth (vertical composition)
+
+Infinit-depth de-nesting en el path AI: cada nivel de composición es un
+*root entity* conectado por aristas tipadas; nunca se anidan sub-estructuras
+dentro de `properties`.
+
+- **Arsenal local** (`schemas/types/`):
+  - `physical_asset.json` — overlay sobre el canon `ume-standard` (unión
+    `brand`/`model`/`serial_number` + `asset_class` opcional
+    `hotel|room|bathroom|fixture|part|other` + `specifications`). Auto-edge
+    `contains_component` con edge props (`relevance` ∈ `critical|medium|low`,
+    `criticality_score` 0–1).
+  - `travel_itinerary.json`, `travel_day.json`, `travel_booking.json`,
+    `travel_activity.json` — pack de viaje global (itinerario → día →
+    booking/activity).
+  - Reemplazo por `tenant::type` en el merge local — no duplica filas en
+    `/ingest/api/types`.
+- **BFS related** (`src/lib/relatedDefs.ts`): `collectRelatedDefs` ahora
+  visita hasta `INGEST_RELATED_HOPS` (default **4**) saltos; primario
+  siempre separado, no se duplica en la lista de relacionados; los self-edges
+  no producen loop infinito.
+- **Hard cap `maxEntities`** (`src/lib/relatedDefs.ts#aiMaxEntities`):
+  `min(INGEST_AI_MAX_ENTITIES ?? 25, INGEST_BATCH_LIMIT ?? 50)`. UI, ruta
+  y extractor comparten la misma resolución (`clampMaxEntities`).
+- **Prompt INFINITE DEPTH** (`src/lib/llmExtractor.ts`): bloque de reglas
+  que prohíbe anidar compuestos dentro de `properties`, obliga a encadenar
+  aristas tipadas y a emitir edge props cuando el rol las requiere.
+- **Cert** (`tests/infinite-depth.test.ts`): cadena de 5 niveles
+  (hotel → room → bathroom → fixture → part) pasa `validateShapeBatch` +
+  `topoSortBatch`; el borde `fixture → part` lleva `relevance: critical`,
+  `criticality_score: 0.95`. Negativos: `relevance: "high"` y edge props
+  faltantes fallan shape.
+- **Read-only SQL** (`docs/RECURSIVE-HIERARCHY.sql`): CTEs `descendants`,
+  `ancestors`, `subtree` con columnas de `ume-standard/sql/001_init.sql`.
+  Documental, no expuesto como endpoint HTTP.
 
 ## Estructura
 

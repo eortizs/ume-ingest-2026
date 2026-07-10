@@ -1,0 +1,17 @@
+{
+  "type": "travel_activity",
+  "tenant": "global",
+  "displayName": "Actividad de Viaje",
+  "propertiesSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["title"],
+    "properties": {
+      "title": { "type": "string", "minLength": 1 },
+      "location": { "type": "string" },
+      "starts_at": { "type": "string", "format": "date-time" },
+      "duration_minutes": { "type": "integer", "minimum": 0 }
+    }
+  },
+  "allowedRelationships": []
+}

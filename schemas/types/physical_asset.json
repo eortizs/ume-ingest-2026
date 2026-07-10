@@ -1,0 +1,38 @@
+{
+  "type": "physical_asset",
+  "tenant": "global",
+  "displayName": "Activo Físico / Componente Estructural",
+  "propertiesSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "brand": { "type": "string" },
+      "model": { "type": "string" },
+      "serial_number": { "type": "string" },
+      "asset_class": {
+        "type": "string",
+        "enum": ["hotel", "room", "bathroom", "fixture", "part", "other"]
+      },
+      "specifications": { "type": "object", "additionalProperties": true }
+    }
+  },
+  "allowedRelationships": [
+    {
+      "role": "contains_component",
+      "allowedTargetTypes": ["physical_asset"],
+      "relationshipPropertiesSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relevance", "criticality_score"],
+        "properties": {
+          "relevance": {
+            "type": "string",
+            "enum": ["critical", "medium", "low"]
+          },
+          "criticality_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  ]
+}

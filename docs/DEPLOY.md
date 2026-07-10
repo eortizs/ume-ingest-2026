@@ -13,6 +13,13 @@ INGEST_BATCH_LIMIT=50
 INGEST_CREATED_BY=ingest:web
 # Nota: el path AI usa `INGEST_CREATED_BY ?? 'ingest:ai-agent'` si la env
 # está unset. Para forzar `ingest:web` también en extracciones AI, ponerlo acá.
+
+# Hard cap de entidades por batch AI: min(INGEST_AI_MAX_ENTITIES, INGEST_BATCH_LIMIT)
+INGEST_AI_MAX_ENTITIES=25
+INGEST_AI_DEFAULT_ENTITIES=10
+
+# Profundidad de related-defs BFS alimentado al prompt
+INGEST_RELATED_HOPS=4
 ```
 
 El operador debe copiar las claves desde el archivo padre `/home/UME/.env`
@@ -81,6 +88,18 @@ location /ingest {
    - Repetir con `relevance: "high"` en el texto (o prompt con seed LLM) →
      preview debe mostrar error de shape en la entidad que tenga la relación
      mala (no debe commitear).
+7. **Smoke recursivo (AI hierarchy)**:
+   - targetType `physical_asset`, tenantId `acme`, maxEntities 25.
+   - pegar texto describiendo un hotel con rooms / bathrooms / fixtures /
+     parts (p.ej. descripción de propiedad de 4 niveles).
+   - preview debe mostrar 5+ entidades `physical_asset` encadenadas por
+     `contains_component` con `relevance: critical` (mínimo el borde crítico
+     del leaf) y `criticality_score: 0.95`.
+   - commit → confirmar filas nuevas en `entities` + `entity_relationships`.
+   - Query documental en [`RECURSIVE-HIERARCHY.sql`](./RECURSIVE-HIERARCHY.sql)
+     ejecutable contra `ume-pg` (CTE recursivo sobre la raíz).
+   - Repetir con `relevance: "high"` en algún borde → preview debe fallar
+     shape (no debe commitear).
 
 ## Conformance esperado
 

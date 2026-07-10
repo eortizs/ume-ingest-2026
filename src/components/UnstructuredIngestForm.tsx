@@ -8,6 +8,19 @@ interface TypeInfo {
   displayName: string;
 }
 
+const UI_DEFAULT_ENTITIES = 10;
+const UI_HARD_ENTITIES = Math.min(
+  Number(
+    (typeof process !== 'undefined' &&
+      process.env?.NEXT_PUBLIC_INGEST_AI_MAX_ENTITIES) ||
+      25,
+  ),
+  Number(
+    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_INGEST_BATCH_LIMIT) ||
+      50,
+  ),
+) || 25;
+
 export default function UnstructuredIngestForm({
   types,
   onPreview,
@@ -19,7 +32,7 @@ export default function UnstructuredIngestForm({
   const [tenantId, setTenantId] = useState<string>('');
   const [text, setText] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
-  const [maxEntities, setMaxEntities] = useState<number>(5);
+  const [maxEntities, setMaxEntities] = useState<number>(UI_DEFAULT_ENTITIES);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,9 +136,13 @@ export default function UnstructuredIngestForm({
             <input
               type="number"
               min={1}
-              max={10}
+              max={UI_HARD_ENTITIES}
               value={maxEntities}
-              onChange={(e) => setMaxEntities(Number(e.target.value))}
+              onChange={(e) =>
+                setMaxEntities(
+                  Math.max(1, Math.min(UI_HARD_ENTITIES, Number(e.target.value))),
+                )
+              }
             />
           </div>
           <div />

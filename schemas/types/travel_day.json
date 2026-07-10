@@ -1,0 +1,25 @@
+{
+  "type": "travel_day",
+  "tenant": "global",
+  "displayName": "Día de Viaje",
+  "propertiesSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["day_number", "date"],
+    "properties": {
+      "day_number": { "type": "integer", "minimum": 1 },
+      "date": { "type": "string", "format": "date" },
+      "notes": { "type": "string" }
+    }
+  },
+  "allowedRelationships": [
+    {
+      "role": "has_booking",
+      "allowedTargetTypes": ["travel_booking"]
+    },
+    {
+      "role": "has_activity",
+      "allowedTargetTypes": ["travel_activity"]
+    }
+  ]
+}

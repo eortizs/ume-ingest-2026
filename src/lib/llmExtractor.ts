@@ -11,6 +11,7 @@ import {
   NormalizationError,
 } from './normalizeEntity.js';
 import { validateShapeBatch } from './validateBatch.js';
+import { aiMaxEntities } from './relatedDefs.js';
 
 export interface LlmExtractRequest {
   text: string;
@@ -140,13 +141,19 @@ function buildSystemPrompt(
     `1. Output ONE JSON object (no other prose) of the form:`,
     `   { "thinking": "<your CoT reasoning>", "entities": [ ... ] }`,
     `   with at most ${max} entity/entities.`,
-    `2. If the text describes a composite (e.g. a POS ticket with line items), DISCONNECT it into multiple root entities: one of "${def.type}" plus child entities of the allowed target types.`,
+    `2. If the text describes a composite (e.g. a POS ticket with line items, a hotel with rooms, an itinerary with bookings), DISCONNECT it into multiple root entities: one of "${def.type}" plus child entities of the allowed target types.`,
     `3. Each entity MUST have exactly these ROOT fields: id (uuid string; server may regenerate), name (non-empty string), type (must resolve to a known type from the schemas above), tenantId (string).`,
     `4. NEVER use root fields "tenant", "status", or nest "createdBy"/"lifecycle" — server fills those.`,
     `5. Edge relevance: only set "properties" on a relationship if the role schema REQUIRES edge properties (provided above). When required, edge properties must include "relevance" (enum: critical | medium | low) and "criticality_score" (number 0–1). NEVER use "high" — that is non-canonical.`,
     `6. Within a single batch, reference newly-created entities via relationships using the SAME uuid you assigned in this response. Server will reorder writes topologically.`,
     `7. Be conservative: if information is missing, drop the field; do NOT invent.`,
     `8. Put your full reasoning into the JSON "thinking" field. Do NOT emit any text outside the JSON object.`,
+    ``,
+    `INFINITE DEPTH (de-nesting rule):`,
+    `a. Each emitted entity is a ROOT entity — NEVER nest composite sub-structures inside another entity's "properties" (e.g. no "rooms": [...] inside a hotel entity; no "lines": [...] inside a ticket entity). Promote every meaningful micro-level into its own root entity connected by a typed relationship.`,
+    `b. To represent hierarchy, chain typed edges across multiple root entities (parent → child → grand-child ...). For self-recursive types (e.g. physical_asset with role "contains_component"), connect a parent to a child that itself may have children via the same role.`,
+    `c. Assign edge "properties" (relevance + criticality_score) whenever the role schema REQUIRES them — typically for self-recursive or cross-cutting composition edges.`,
+    `d. Respect the cap of ${max} entities: trim leaf-level detail before coarsening the spine.`,
   ].join('\n');
 }
 
@@ -188,7 +195,8 @@ export async function extractWithLlm(
   model: string,
   registry: TypeRegistry,
 ): Promise<LlmExtractResult> {
-  const max = Math.max(1, Math.min(req.maxEntities ?? 5, 10));
+  const hard = aiMaxEntities();
+  const max = Math.max(1, Math.min(req.maxEntities ?? 10, hard));
   const warnings: string[] = [];
   const aiCreatedBy =
     process.env.INGEST_CREATED_BY ?? 'ingest:ai-agent';

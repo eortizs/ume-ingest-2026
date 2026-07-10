@@ -16,6 +16,10 @@ function localPackDir(): string {
 let cached: { registry: TypeRegistry; defs: EntityTypeDefinition[] } | null =
   null;
 
+function keyOf(d: EntityTypeDefinition): string {
+  return `${d.tenant}::${d.type}`;
+}
+
 export async function loadRegistry(): Promise<TypeRegistry> {
   return (await loadRegistryWithDefs()).registry;
 }
@@ -25,14 +29,15 @@ export async function loadRegistryWithDefs(): Promise<{
   defs: EntityTypeDefinition[];
 }> {
   if (cached) return cached;
+  const byKey = new Map<string, EntityTypeDefinition>();
+
   const dir = fixturesDir();
   const entries = await readdir(dir);
   const files = entries.filter((e) => e.endsWith('.json')).sort();
-  const defs: EntityTypeDefinition[] = [];
   for (const f of files) {
     const raw = await readFile(resolve(dir, f), 'utf8');
     const def = JSON.parse(raw) as EntityTypeDefinition;
-    defs.push(def);
+    byKey.set(keyOf(def), def);
   }
 
   const localDir = localPackDir();
@@ -46,9 +51,10 @@ export async function loadRegistryWithDefs(): Promise<{
   for (const f of localFiles) {
     const raw = await readFile(resolve(localDir, f), 'utf8');
     const def = JSON.parse(raw) as EntityTypeDefinition;
-    defs.push(def);
+    byKey.set(keyOf(def), def);
   }
 
+  const defs = [...byKey.values()];
   const reg = new TypeRegistry();
   for (const d of defs) reg.add(d);
   cached = { registry: reg, defs };

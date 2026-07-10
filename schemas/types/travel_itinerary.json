@@ -1,0 +1,22 @@
+{
+  "type": "travel_itinerary",
+  "tenant": "global",
+  "displayName": "Itinerario de Viaje",
+  "propertiesSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["destination", "start_date"],
+    "properties": {
+      "destination": { "type": "string", "minLength": 1 },
+      "start_date": { "type": "string", "format": "date" },
+      "end_date": { "type": "string", "format": "date" },
+      "traveler_name": { "type": "string" }
+    }
+  },
+  "allowedRelationships": [
+    {
+      "role": "has_day",
+      "allowedTargetTypes": ["travel_day"]
+    }
+  ]
+}
