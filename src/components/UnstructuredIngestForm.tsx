@@ -47,7 +47,7 @@ export default function UnstructuredIngestForm({
       fd.set('maxEntities', String(maxEntities));
       if (text) fd.set('text', text);
       else if (file) fd.set('file', file);
-      const r = await fetch('/ingest/api/unstructured', {
+      const r = await fetch('/ingest/api/unstructured/', {
         method: 'POST',
         body: fd,
       });

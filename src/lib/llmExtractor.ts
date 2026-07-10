@@ -40,6 +40,7 @@ export interface OpenRouterChatRequest {
   messages: OpenRouterMessage[];
   response_format?: { type: 'json_object' };
   temperature?: number;
+  max_tokens?: number;
 }
 
 export interface OpenRouterChatResponse {
@@ -50,7 +51,12 @@ export interface OpenRouterChatResponse {
 
 export type FetchLike = (
   input: string,
-  init: { method: string; headers: Record<string, string>; body: string },
+  init: {
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+    signal?: AbortSignal;
+  },
 ) => Promise<{
   ok: boolean;
   status: number;
@@ -169,24 +175,128 @@ function errorsToPrompt(errors: ValidationError[]): string {
     .join('\n');
 }
 
+/** Cheap local fixes so one slow LLM call is enough more often. */
+function softRepairEntity(ent: Entity): Entity {
+  const props = { ...(ent.properties as Record<string, unknown>) };
+  let changed = false;
+
+  // date-only → date-time
+  for (const [k, v] of Object.entries(props)) {
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      props[k] = `${v}T12:00:00.000Z`;
+      changed = true;
+    } else if (
+      typeof v === 'string' &&
+      /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(v)
+    ) {
+      const iso = v.replace(' ', 'T');
+      props[k] = iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso)
+        ? iso
+        : `${iso}${iso.length === 16 ? ':00' : ''}.000Z`;
+      changed = true;
+    }
+  }
+
+  // Common defaults for POS-like tickets in MX.
+  if (ent.type === 'pos_ticket') {
+    if (props.currency == null || props.currency === '') {
+      props.currency = 'MXN';
+      changed = true;
+    }
+    if (typeof props.total === 'string' && props.total !== '') {
+      const n = Number(props.total);
+      if (Number.isFinite(n)) {
+        props.total = n;
+        changed = true;
+      }
+    }
+  }
+  if (ent.type === 'pos_ticket_line') {
+    for (const k of ['quantity', 'unit_price', 'subtotal'] as const) {
+      if (typeof props[k] === 'string') {
+        const n = Number(props[k]);
+        if (Number.isFinite(n)) {
+          props[k] = k === 'quantity' ? Math.trunc(n) : n;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // Fill required edge props when the model forgot them.
+  const rels = (ent.relationships ?? []).map((rel) => {
+    if (rel.role !== 'contains_line') return rel;
+    const existing =
+      rel.properties && typeof rel.properties === 'object'
+        ? (rel.properties as Record<string, unknown>)
+        : {};
+    return {
+      ...rel,
+      properties: {
+        relevance: 'medium',
+        criticality_score: 0.5,
+        ...existing,
+      },
+    };
+  });
+
+  return { ...ent, properties: props, relationships: rels };
+}
+
+function openRouterTimeoutMs(): number {
+  const v = Number(process.env.OPENROUTER_TIMEOUT_MS ?? '60000');
+  if (!Number.isFinite(v) || v < 5_000) return 60_000;
+  return Math.floor(v);
+}
+
 export async function callOpenRouter(
   req: OpenRouterChatRequest,
   apiKey: string,
 ): Promise<OpenRouterChatResponse> {
   const f = getFetch();
-  const res = await f(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 500)}`);
+  const timeoutMs = openRouterTimeoutMs();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const started = Date.now();
+  try {
+    // Prefer low reasoning effort when the provider supports it (ignored otherwise).
+    const body: Record<string, unknown> = {
+      ...req,
+      reasoning: { effort: 'low' },
+    };
+    console.log(
+      '[openrouter] request',
+      req.model,
+      'msgs=',
+      req.messages.length,
+      'timeoutMs=',
+      timeoutMs,
+    );
+    const res = await f(ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const bodyText = await res.text();
+      throw new Error(`OpenRouter ${res.status}: ${bodyText.slice(0, 500)}`);
+    }
+    const json = (await res.json()) as OpenRouterChatResponse;
+    console.log('[openrouter] ok', Date.now() - started, 'ms');
+    return json;
+  } catch (e) {
+    console.log('[openrouter] fail', Date.now() - started, 'ms', (e as Error).message);
+    if ((e as Error).name === 'AbortError') {
+      throw new Error(`OpenRouter timeout after ${timeoutMs}ms`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return (await res.json()) as OpenRouterChatResponse;
 }
 
 export async function extractWithLlm(
@@ -208,7 +318,7 @@ export async function extractWithLlm(
     { role: 'user', content: userMsg },
   ];
 
-  const maxAttempts = 3;
+  const maxAttempts = Number(process.env.INGEST_LLM_MAX_ATTEMPTS ?? '2') || 2;
   let attempt = 0;
   let lastError: string | undefined;
   let parsed: ParsedAgentResponse | undefined;
@@ -234,10 +344,26 @@ export async function extractWithLlm(
           messages,
           response_format: { type: 'json_object' },
           temperature: 0.2,
+          max_tokens: Number(process.env.INGEST_LLM_MAX_TOKENS ?? '6000') || 6000,
         },
         apiKey,
       );
-      raw = resp.choices?.[0]?.message?.content ?? '';
+      const msg = resp.choices?.[0]?.message as {
+        content?: string | null;
+        reasoning?: string | null;
+      };
+      raw = msg?.content ?? '';
+      // Some reasoning models return empty content and put text in reasoning.
+      if (!raw && typeof msg?.reasoning === 'string') {
+        const fence = msg.reasoning.match(/```(?:json)?\s*([\s\S]*?)```/);
+        raw = fence ? fence[1] : msg.reasoning;
+      }
+      console.log(
+        '[openrouter] contentLen=',
+        raw.length,
+        'preview=',
+        raw.slice(0, 200).replace(/\n/g, ' '),
+      );
     } catch (e) {
       lastError = (e as Error).message;
       attempt++;
@@ -256,6 +382,7 @@ export async function extractWithLlm(
       parsed = parseAgentResponse(raw);
     } catch (e) {
       lastError = (e as Error).message;
+      console.log('[openrouter] parse fail', lastError, 'raw=', raw.slice(0, 400));
       attempt++;
       if (attempt >= maxAttempts) {
         return {
@@ -294,7 +421,7 @@ export async function extractWithLlm(
               buildJournalMarkdown(ent.properties as never) ?? ent.markdown,
           };
         }
-        entities.push(ent);
+        entities.push(softRepairEntity(ent));
       } catch (e) {
         if (e instanceof NormalizationError) {
           warnings.push(`normalize: ${e.message}`);

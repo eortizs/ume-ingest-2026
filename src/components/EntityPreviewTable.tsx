@@ -48,7 +48,7 @@ export default function EntityPreviewTable({ state }: { state: PreviewState }) {
     setCommitting(true);
     setCommitResult(null);
     try {
-      const r = await fetch('/ingest/api/commit', {
+      const r = await fetch('/ingest/api/commit/', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ entities: state.entities }),

@@ -6,21 +6,8 @@ import type { PreviewState } from './EntityPreviewTable';
 interface TypeInfo {
   type: string;
   displayName: string;
+  tenant?: string;
 }
-
-const SAMPLE_MAPPING = `{
-  "source": "csv demo",
-  "targetType": "task",
-  "mapping": {
-    "id": "generate_uuidv7()",
-    "name": "source.title",
-    "tenantId": "__tenant__",
-    "properties": {
-      "status": "source.status",
-      "priority": "source.priority"
-    }
-  }
-}`;
 
 export default function StructuredIngestForm({
   types,
@@ -30,8 +17,7 @@ export default function StructuredIngestForm({
   onPreview: (p: PreviewState) => void;
 }) {
   const [targetType, setTargetType] = useState<string>('');
-  const [tenantId, setTenantId] = useState<string>('');
-  const [mappingJson, setMappingJson] = useState<string>(SAMPLE_MAPPING);
+  const [tenantId, setTenantId] = useState<string>('global');
   const [jsonText, setJsonText] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,22 +29,12 @@ export default function StructuredIngestForm({
     setError(null);
     try {
       const fd = new FormData();
-      fd.set('mapping', mappingJson);
-      if (tenantId) fd.set('tenantId', tenantId);
-      if (targetType) {
-        try {
-          const m = JSON.parse(mappingJson);
-          m.targetType = targetType;
-          setMappingJson(JSON.stringify(m, null, 2));
-          fd.set('mapping', JSON.stringify(m));
-        } catch {
-          /* ignore, server will validate */
-        }
-      }
+      fd.set('tenantId', tenantId || 'global');
+      if (targetType) fd.set('targetType', targetType);
       if (file) fd.set('file', file);
       else if (jsonText) fd.set('json', jsonText);
 
-      const r = await fetch('/ingest/api/structured', {
+      const r = await fetch('/ingest/api/structured/', {
         method: 'POST',
         body: fd,
       });
@@ -69,7 +45,7 @@ export default function StructuredIngestForm({
           ok: false,
           entities: [],
           validation: [],
-          warnings: [],
+          warnings: j.warnings ?? [],
           error: j.error,
         });
         return;
@@ -79,7 +55,6 @@ export default function StructuredIngestForm({
         entities: j.entities ?? [],
         validation: j.validation ?? [],
         warnings: j.warnings ?? [],
-        mappingErrors: j.mappingErrors,
       });
     } catch (e) {
       setError(String(e));
@@ -90,47 +65,41 @@ export default function StructuredIngestForm({
 
   return (
     <section className="card">
-      <h2>Estructurado (CSV / JSON + mapping)</h2>
+      <h2>Estructurado (CSV / JSON — mapeo por LLM)</h2>
       <p className="subtle">
-        Sube un CSV/JSON + un mapping JSON declarativo. La validación es{' '}
-        <code>shape</code> previa al commit.
+        Sube un archivo CSV o JSON. El LLM infiere el tipo de entidad y mapea
+        cada fila. Si conoces el tipo de destino puedes seleccionarlo; si no,
+        elige <code>(auto)</code> y el LLM lo decide.
       </p>
 
       <form onSubmit={submit}>
         <div className="row">
           <div>
-            <label>targetType</label>
+            <label>Tipo de entidad destino</label>
             <select
               value={targetType}
               onChange={(e) => setTargetType(e.target.value)}
             >
-              <option value="">— elegir —</option>
+              <option value="">(auto — el LLM decide)</option>
               {types.map((t) => (
-                <option key={t.type} value={t.type}>
-                  {t.type} ({t.displayName})
+                <option key={`${t.tenant ?? 'g'}::${t.type}`} value={t.type}>
+                  {t.displayName} <code>{t.type}</code>
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label>tenantId (constante si no se mapea)</label>
+            <label>Tenant</label>
             <input
               type="text"
               value={tenantId}
               onChange={(e) => setTenantId(e.target.value)}
-              placeholder="acme"
+              placeholder="global"
             />
           </div>
         </div>
 
-        <label>Mapping (JSON)</label>
-        <textarea
-          rows={14}
-          value={mappingJson}
-          onChange={(e) => setMappingJson(e.target.value)}
-        />
-
-        <label>Archivo (CSV o JSON array)</label>
+        <label>Archivo (CSV o JSON)</label>
         <input
           type="file"
           accept=".csv,.json,.txt"
@@ -142,12 +111,12 @@ export default function StructuredIngestForm({
           rows={4}
           value={jsonText}
           onChange={(e) => setJsonText(e.target.value)}
-          placeholder='[{"title":"Foo","status":"open","priority":"high"}]'
+          placeholder='[{"title":"Foo","status":"open"}]'
         />
 
         <div style={{ marginTop: 12 }}>
           <button className="primary" disabled={busy} type="submit">
-            {busy ? 'Procesando…' : 'Previsualizar'}
+            {busy ? 'Procesando con LLM…' : 'Previsualizar'}
           </button>
         </div>
         {error && <div className="error">{error}</div>}
