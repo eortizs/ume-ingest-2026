@@ -12,8 +12,11 @@ export const runtime = 'nodejs';
 /** Allow long multi-step LLM extraction under reverse proxy. */
 export const maxDuration = 180;
 
+const DEBUG =
+  process.env.INGEST_DEBUG === '1' || process.env.LOG_LEVEL === 'debug';
+
 function log(...args: unknown[]) {
-  console.log('[structured]', new Date().toISOString(), ...args);
+  if (DEBUG) console.log('[structured]', new Date().toISOString(), ...args);
 }
 
 async function classifyTypeWithLlm(

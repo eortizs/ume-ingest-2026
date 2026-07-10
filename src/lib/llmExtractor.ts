@@ -13,6 +13,11 @@ import {
 import { validateShapeBatch } from './validateBatch.js';
 import { aiMaxEntities } from './relatedDefs.js';
 
+const DEBUG = process.env.INGEST_DEBUG === '1' || process.env.LOG_LEVEL === 'debug';
+const dlog = (...args: unknown[]) => {
+  if (DEBUG) console.log('[llm]', ...args);
+};
+
 export interface LlmExtractRequest {
   text: string;
   targetType: string;
@@ -264,14 +269,7 @@ export async function callOpenRouter(
       ...req,
       reasoning: { effort: 'low' },
     };
-    console.log(
-      '[openrouter] request',
-      req.model,
-      'msgs=',
-      req.messages.length,
-      'timeoutMs=',
-      timeoutMs,
-    );
+    dlog('request', req.model, 'msgs=', req.messages.length, 'timeoutMs=', timeoutMs);
     const res = await f(ENDPOINT, {
       method: 'POST',
       headers: {
@@ -286,10 +284,10 @@ export async function callOpenRouter(
       throw new Error(`OpenRouter ${res.status}: ${bodyText.slice(0, 500)}`);
     }
     const json = (await res.json()) as OpenRouterChatResponse;
-    console.log('[openrouter] ok', Date.now() - started, 'ms');
+    dlog('ok', Date.now() - started, 'ms');
     return json;
   } catch (e) {
-    console.log('[openrouter] fail', Date.now() - started, 'ms', (e as Error).message);
+    console.warn('[openrouter] fail', Date.now() - started, 'ms', (e as Error).message);
     if ((e as Error).name === 'AbortError') {
       throw new Error(`OpenRouter timeout after ${timeoutMs}ms`);
     }
@@ -358,8 +356,8 @@ export async function extractWithLlm(
         const fence = msg.reasoning.match(/```(?:json)?\s*([\s\S]*?)```/);
         raw = fence ? fence[1] : msg.reasoning;
       }
-      console.log(
-        '[openrouter] contentLen=',
+      dlog(
+        'contentLen=',
         raw.length,
         'preview=',
         raw.slice(0, 200).replace(/\n/g, ' '),
@@ -382,7 +380,7 @@ export async function extractWithLlm(
       parsed = parseAgentResponse(raw);
     } catch (e) {
       lastError = (e as Error).message;
-      console.log('[openrouter] parse fail', lastError, 'raw=', raw.slice(0, 400));
+      console.warn('[openrouter] parse fail', lastError, 'raw=', raw.slice(0, 400));
       attempt++;
       if (attempt >= maxAttempts) {
         return {
