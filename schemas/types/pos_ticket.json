@@ -1,0 +1,35 @@
+{
+  "type": "pos_ticket",
+  "tenant": "global",
+  "displayName": "POS Ticket (parent)",
+  "propertiesSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["total", "currency"],
+    "properties": {
+      "total": { "type": "number", "minimum": 0 },
+      "currency": { "type": "string", "minLength": 1 },
+      "merchant": { "type": "string" },
+      "purchased_at": { "type": "string", "format": "date-time" }
+    }
+  },
+  "allowedRelationships": [
+    {
+      "role": "contains_line",
+      "allowedTargetTypes": ["pos_ticket_line"],
+      "relationshipPropertiesSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relevance", "criticality_score"],
+        "properties": {
+          "relevance": {
+            "type": "string",
+            "enum": ["critical", "medium", "low"]
+          },
+          "criticality_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  ]
+}

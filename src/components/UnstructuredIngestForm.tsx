@@ -19,7 +19,7 @@ export default function UnstructuredIngestForm({
   const [tenantId, setTenantId] = useState<string>('');
   const [text, setText] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
-  const [maxEntities, setMaxEntities] = useState<number>(3);
+  const [maxEntities, setMaxEntities] = useState<number>(5);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,6 +55,7 @@ export default function UnstructuredIngestForm({
         entities: j.entities ?? [],
         validation: j.validation ?? [],
         warnings: j.warnings ?? [],
+        thinking: j.thinking,
       });
     } catch (e) {
       setError(String(e));

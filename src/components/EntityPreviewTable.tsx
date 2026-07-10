@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import ValidationErrors from './ValidationErrors';
 
 export interface PreviewRow {
@@ -15,7 +15,16 @@ export interface PreviewState {
   validation: PreviewRow[];
   warnings: string[];
   mappingErrors?: Array<{ index: number; message: string }>;
+  thinking?: string;
   error?: string;
+}
+
+interface Rel {
+  targetId?: string;
+  targetType?: string;
+  role?: string;
+  direction?: string;
+  properties?: Record<string, unknown>;
 }
 
 export default function EntityPreviewTable({ state }: { state: PreviewState }) {
@@ -26,9 +35,14 @@ export default function EntityPreviewTable({ state }: { state: PreviewState }) {
     rejected?: Array<{ index: number; errors?: PreviewRow['errors'] }>;
     error?: string;
   } | null>(null);
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
   const okCount = state.validation.filter((r) => r.ok).length;
   const failCount = state.validation.filter((r) => !r.ok).length;
+  const idIndex = new Map<string, number>();
+  state.entities.forEach((e, i) => {
+    if (typeof e.id === 'string') idIndex.set(e.id, i);
+  });
 
   async function commit() {
     setCommitting(true);
@@ -46,6 +60,14 @@ export default function EntityPreviewTable({ state }: { state: PreviewState }) {
     } finally {
       setCommitting(false);
     }
+  }
+
+  function targetLabel(targetId: string | undefined): string {
+    if (!targetId) return '∅';
+    const i = idIndex.get(targetId);
+    if (i === undefined) return targetId;
+    const t = state.entities[i];
+    return `#${i} ${String(t.name)} (${String(t.type)})`;
   }
 
   return (
@@ -79,6 +101,12 @@ export default function EntityPreviewTable({ state }: { state: PreviewState }) {
           </ul>
         </div>
       )}
+      {state.thinking && (
+        <details className="thinking">
+          <summary>CoT (thinking)</summary>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{state.thinking}</pre>
+        </details>
+      )}
 
       <table className="preview">
         <thead>
@@ -96,27 +124,81 @@ export default function EntityPreviewTable({ state }: { state: PreviewState }) {
         <tbody>
           {state.entities.map((e, i) => {
             const row = state.validation[i];
+            const rels = ((e.relationships as Rel[]) ?? []);
+            const open = expanded[i] ?? false;
+            const md = typeof e.markdown === 'string' ? e.markdown.trim() : '';
             return (
-              <tr key={i}>
-                <td>{i}</td>
-                <td>{row?.ok ? '✓' : '✗'}</td>
-                <td>
-                  <code>{String(e.type)}</code>
-                </td>
-                <td>{String(e.name)}</td>
-                <td>{String(e.tenantId)}</td>
-                <td>
-                  {Object.keys((e.properties as object) ?? {}).length}
-                </td>
-                <td>
-                  {((e.relationships as unknown[]) ?? []).length}
-                </td>
-                <td>
-                  {row?.errors && row.errors.length > 0 && (
-                    <ValidationErrors errors={row.errors} />
-                  )}
-                </td>
-              </tr>
+              <Fragment key={i}>
+                <tr>
+                  <td>{i}</td>
+                  <td>{row?.ok ? '✓' : '✗'}</td>
+                  <td>
+                    <code>{String(e.type)}</code>
+                  </td>
+                  <td>{String(e.name)}</td>
+                  <td>{String(e.tenantId)}</td>
+                  <td>
+                    {Object.keys((e.properties as object) ?? {}).length}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpanded((s) => ({ ...s, [i]: !open }))
+                      }
+                      style={{ fontSize: 12 }}
+                    >
+                      {rels.length} {open ? '▾' : '▸'}
+                    </button>
+                  </td>
+                  <td>
+                    {row?.errors && row.errors.length > 0 && (
+                      <ValidationErrors errors={row.errors} />
+                    )}
+                  </td>
+                </tr>
+                {open && (rels.length > 0 || md) && (
+                  <tr>
+                    <td colSpan={8} style={{ background: '#f7f7f7' }}>
+                      {rels.length > 0 && (
+                        <ul style={{ margin: '0 0 8px 18px' }}>
+                          {rels.map((r, j) => (
+                            <li key={j}>
+                              <code>{r.role}</code> →{' '}
+                              <code>{r.targetType}</code> @{' '}
+                              <code>{targetLabel(r.targetId)}</code>
+                              {r.properties && (
+                                <>
+                                  {' '}
+                                  <span className="subtle">
+                                    props: {JSON.stringify(r.properties)}
+                                  </span>
+                                </>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {md && (
+                        <details>
+                          <summary className="subtle">
+                            markdown ({(md.length)} chars)
+                          </summary>
+                          <pre
+                            style={{
+                              whiteSpace: 'pre-wrap',
+                              maxHeight: 200,
+                              overflow: 'auto',
+                            }}
+                          >
+                            {md.slice(0, 2000)}
+                          </pre>
+                        </details>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>

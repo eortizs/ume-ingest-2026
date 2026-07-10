@@ -1,0 +1,23 @@
+{
+  "type": "pos_ticket_line",
+  "tenant": "global",
+  "displayName": "POS Ticket Line",
+  "propertiesSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["quantity", "unit_price", "subtotal"],
+    "properties": {
+      "sku": { "type": "string" },
+      "description": { "type": "string" },
+      "quantity": { "type": "integer", "minimum": 1 },
+      "unit_price": { "type": "number", "minimum": 0 },
+      "subtotal": { "type": "number", "minimum": 0 }
+    }
+  },
+  "allowedRelationships": [
+    {
+      "role": "belongs_to_ticket",
+      "allowedTargetTypes": ["pos_ticket"]
+    }
+  ]
+}

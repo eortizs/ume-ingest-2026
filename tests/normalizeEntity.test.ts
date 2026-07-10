@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeEntity,
+  normalizeEntityDetailed,
   NormalizationError,
 } from '../src/lib/normalizeEntity';
 
@@ -80,5 +81,57 @@ describe('normalizeEntity', () => {
       tenantId: 'acme',
     });
     expect(e.id).toBe('01900000-0000-7000-8000-000000000001');
+  });
+
+  it('forceTenantId overrides provided tenantId', () => {
+    const e = normalizeEntity(
+      {
+        name: 'X',
+        type: 'task',
+        tenantId: 'wrong',
+      },
+      { forceTenantId: 'forced' },
+    );
+    expect(e.tenantId).toBe('forced');
+  });
+
+  it('forceTenantId fills missing tenantId', () => {
+    const e = normalizeEntity(
+      {
+        name: 'X',
+        type: 'task',
+      },
+      { forceTenantId: 'forced' },
+    );
+    expect(e.tenantId).toBe('forced');
+  });
+
+  it('stripUnknownRoots drops illegal root fields and reports them', () => {
+    const r = normalizeEntityDetailed(
+      {
+        name: 'X',
+        type: 'task',
+        tenantId: 'acme',
+        status: 'open',
+        extra: 1,
+      },
+      { stripUnknownRoots: true },
+    );
+    expect(r.entity.tenantId).toBe('acme');
+    expect(r.stripped.sort()).toEqual(['extra', 'status']);
+    expect((r.entity as unknown as Record<string, unknown>).status).toBeUndefined();
+  });
+
+  it('aliased report lists rewritten keys (e.g. tenant)', () => {
+    const r = normalizeEntityDetailed(
+      {
+        name: 'X',
+        type: 'task',
+        tenant: 'acme',
+      },
+      {},
+    );
+    expect(r.aliased).toContain('tenant');
+    expect(r.entity.tenantId).toBe('acme');
   });
 });

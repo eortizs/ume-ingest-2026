@@ -1,9 +1,9 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { loadRegistry } from '@/lib/registry';
-import { commitEntities } from '@/lib/store';
 import { validateFullBatch } from '@/lib/validateBatch';
-import { getStore } from '@/lib/store';
+import { commitGraph } from '@/lib/graphCommit';
+import { getStore, getPool } from '@/lib/store';
 import type { Entity } from 'ume-standard';
 
 export const runtime = 'nodejs';
@@ -35,9 +35,12 @@ export async function POST(req: Request) {
 
   const registry = await loadRegistry();
   const list = entities as Entity[];
-  const store = getStore('shape');
+  const batchIds = new Set(list.map((e) => e.id));
+
   let existingIds: Set<string>;
   try {
+    const store = getStore('full');
+    await store.ensureSchema();
     existingIds = await store.listIds();
   } catch (e) {
     return NextResponse.json(
@@ -46,7 +49,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const full = await validateFullBatch(list, registry, existingIds);
+  const mergedIds = new Set<string>([...existingIds, ...batchIds]);
+
+  const full = await validateFullBatch(list, registry, mergedIds);
 
   const okEntities = full.rows
     .filter((r) => r.ok && r.entity)
@@ -56,9 +61,16 @@ export async function POST(req: Request) {
     .map((r) => ({ index: r.index, errors: r.errors }));
 
   let results: { id: string; ok: boolean; error?: string }[] = [];
+  let graphError: string | undefined;
   if (okEntities.length > 0) {
     try {
-      results = await commitEntities(okEntities, registry);
+      const r = await commitGraph(okEntities, registry, getPool());
+      results = r.committed;
+      if (r.missingTargets.length > 0) {
+        graphError = `missing targets: ${JSON.stringify(r.missingTargets)}`;
+      } else if (!r.ok && r.error) {
+        graphError = r.error;
+      }
     } catch (e) {
       return NextResponse.json(
         { ok: false, error: `commit failed: ${(e as Error).message}` },
@@ -68,8 +80,9 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({
-    ok: bad.length === 0 && results.every((r) => r.ok),
+    ok: bad.length === 0 && results.every((r) => r.ok) && !graphError,
     committed: results,
     rejected: bad,
+    error: graphError,
   });
 }

@@ -9,6 +9,10 @@ function fixturesDir(): string {
   return resolve(here, '../../node_modules/ume-standard/schemas/fixtures/types');
 }
 
+function localPackDir(): string {
+  return resolve(process.cwd(), 'schemas/types');
+}
+
 let cached: { registry: TypeRegistry; defs: EntityTypeDefinition[] } | null =
   null;
 
@@ -30,6 +34,21 @@ export async function loadRegistryWithDefs(): Promise<{
     const def = JSON.parse(raw) as EntityTypeDefinition;
     defs.push(def);
   }
+
+  const localDir = localPackDir();
+  let localFiles: string[] = [];
+  try {
+    const localEntries = await readdir(localDir);
+    localFiles = localEntries.filter((e) => e.endsWith('.json')).sort();
+  } catch {
+    localFiles = [];
+  }
+  for (const f of localFiles) {
+    const raw = await readFile(resolve(localDir, f), 'utf8');
+    const def = JSON.parse(raw) as EntityTypeDefinition;
+    defs.push(def);
+  }
+
   const reg = new TypeRegistry();
   for (const d of defs) reg.add(d);
   cached = { registry: reg, defs };

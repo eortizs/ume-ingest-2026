@@ -1,6 +1,10 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
-import { createUUIDv7 } from 'ume-standard';
+import {
+  createUUIDv7,
+  type EntityTypeDefinition,
+  type TypeRegistry,
+} from 'ume-standard';
 import { loadRegistry } from '@/lib/registry';
 import { extractTextFromFile } from '@/lib/textExtract';
 import { extractWithLlm } from '@/lib/llmExtractor';
@@ -30,7 +34,7 @@ export async function POST(req: Request) {
 
   const targetType = (form.get('targetType') as string | null) ?? '';
   const tenantId = (form.get('tenantId') as string | null) ?? '';
-  const maxEntities = Number(form.get('maxEntities') ?? '3');
+  const maxEntities = Number(form.get('maxEntities') ?? '5');
   const textField = form.get('text') as string | null;
   const file = form.get('file');
 
@@ -72,16 +76,20 @@ export async function POST(req: Request) {
     );
   }
 
+  const relatedDefs = collectRelatedDefs(registry, typeDef);
+
   const llmResult = await extractWithLlm(
     {
       text: extractedText,
       targetType,
       tenantId,
       typeDef,
+      relatedDefs,
       maxEntities,
     },
     apiKey,
     model,
+    registry,
   );
 
   if (!llmResult.ok && llmResult.entities.length === 0) {
@@ -108,5 +116,25 @@ export async function POST(req: Request) {
       errors: r.errors,
     })),
     warnings,
+    thinking: llmResult.thinking,
   });
+}
+
+function collectRelatedDefs(
+  registry: TypeRegistry,
+  def: EntityTypeDefinition,
+): EntityTypeDefinition[] {
+  const seen = new Set<string>([def.type]);
+  const out: EntityTypeDefinition[] = [];
+  for (const rel of def.allowedRelationships) {
+    for (const target of rel.allowedTargetTypes) {
+      if (seen.has(target)) continue;
+      const d = registry.resolve(target, 'global');
+      if (d) {
+        seen.add(target);
+        out.push(d);
+      }
+    }
+  }
+  return out;
 }

@@ -47,11 +47,20 @@ POST `/ingest/api/unstructured` (multipart):
 
 - `targetType`, `tenantId` (requeridos).
 - `text` (pegado) o `file` (.txt/.pdf).
-- `maxEntities` (default 3).
+- `maxEntities` (default 5, tope 10).
 
-Usa OpenRouter (`OPENROUTER_API_KEY`, `LLM_MODEL`). Self-heal ×2 sobre JSON
-inválido. El server inyecta `lifecycle` y `createdBy` para corregir omissions
-del LLM.
+Usa OpenRouter (`OPENROUTER_API_KEY`, `LLM_MODEL`). El system prompt exige
+`response_format: json_object` con un envelope `{ "thinking": "<CoT>", "entities": [...] }`
+para que el CoT no se pierda fuera del JSON válido. Self-heal: 3 intentos totales
+sobre **parse fail** o **shape-AJV fail** (errores se re-inyectan al LLM).
+El server inyecta `lifecycle` y `createdBy` (default AI:
+`process.env.INGEST_CREATED_BY ?? 'ingest:ai-agent'`) para corregir omissions
+del LLM, y fuerza `tenantId` del request sobre lo que emita el modelo.
+
+El **pack local** de tipos (`schemas/types/*.json`, plano) se mergea tras
+los fixtures canónicos de `ume-standard`; los nuevos tipos (p.ej.
+`pos_ticket` + `pos_ticket_line`) aparecen automáticamente en el selector
+`targetType` del UI y en `/ingest/api/types`.
 
 ## Canon reconciliation
 
@@ -62,9 +71,38 @@ El normalizador en `src/lib/normalizeEntity.ts` aplica:
 - Genera UUIDv7 si falta `id`.
 - Rellena `lifecycle` y `createdBy`.
 - Limpia relaciones malformadas.
+- `forceTenantId` siempre gana (para flujo AI multi-tenant).
+- `stripUnknownRoots` para tolerar LLM que invente `status` u otros root no-R1
+  (alias + strip; nunca se reintroduce `status` canónico).
 
 Ver `/root/.local/share/kilo/plans/1783646217350-ume-ingest-web.md` para el
 plan completo y decisiones locked.
+
+## AI expansion (appendix v1.2 reconciled)
+
+Implementa la *intención* del draft de apéndice sobre el canon R1 + Appendix-01:
+
+- **Composition prompt** (`src/lib/llmExtractor.ts`): JSON envelope bajo
+  `response_format: json_object` con campo `thinking` para el CoT;
+  inyecta target + tipos relacionados (registry.resolve); permite desconectar
+  contenedores compuestos (p.ej. `pos_ticket` + `pos_ticket_line`). Fallback
+  acepta también `<thinking>...</thinking>` legacy o JSON puro sin thinking.
+- **Self-heal**: parse + shape AJV (3 intentos, errores re-inyectados al LLM).
+- **POS pack local** (`schemas/types/pos_ticket.json`,
+  `pos_ticket_line.json`): `critical|medium|low` + `criticality_score`
+  (canon Appendix-01). El LLM nunca debe usar `relevance: "high"` (test
+  negativo en `tests/ingest-ai.test.ts`).
+- **Topological commit** (`src/lib/graphCommit.ts`): orden topológico,
+  detección de ciclos, targets faltantes.
+- **Batch merge ids**: el commit mete los IDs del batch en `existingIds` antes
+  del `validateFullBatch` para evitar falsos negativos en relaciones
+  intra-batch (`store.ensureSchema()` + `store.listIds()`).
+- **createdBy AI**: el path LLM usa
+  `process.env.INGEST_CREATED_BY ?? 'ingest:ai-agent'`; el path estructurado
+  mantiene `'ingest:web'` por defecto.
+- **`ume-standard` no modificado**; el pack local no toca el gate cert.
+
+Plan SoT: `/root/.local/share/kilo/plans/1783655801474-ume-ingest-ai-expansion.md`.
 
 ## Estructura
 
@@ -73,9 +111,11 @@ src/
   app/                 Next App Router
     api/{types,structured,unstructured,commit}/route.ts
     layout.tsx, page.tsx, globals.css
-  components/          Forms + preview table
-  lib/                 registry, normalizeEntity, mappingEngine, textExtract,
-                       llmExtractor, validateBatch, store
-tests/                 Vitest (no Docker/LLM)
+  components/          Forms + preview table (EntityPreviewTable expande multi-entidad / rels)
+  lib/                 registry (con pack local), normalizeEntity,
+                       mappingEngine, textExtract, llmExtractor (composition + self-heal),
+                       validateBatch, store, graphCommit (topological commit)
+schemas/types/         Local type pack (POS ticket fixtures — no canónico)
+tests/                 Vitest (no Docker/LLM) — incluye ingest-ai POS mock
 docs/DEPLOY.md         Nginx + compose
 ```

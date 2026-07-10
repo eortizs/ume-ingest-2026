@@ -41,6 +41,8 @@ function asLifecycleState(v: string): LifecycleState {
 export interface NormalizeOptions {
   createdBy?: string;
   now?: () => Date;
+  forceTenantId?: string;
+  stripUnknownRoots?: boolean;
 }
 
 export class NormalizationError extends Error {
@@ -50,24 +52,50 @@ export class NormalizationError extends Error {
   }
 }
 
+export interface NormalizeResult {
+  entity: Entity;
+  stripped: string[];
+  aliased: string[];
+}
+
 export function normalizeEntity(
   raw: Record<string, unknown>,
   opts: NormalizeOptions = {},
 ): Entity {
+  return normalizeEntityDetailed(raw, opts).entity;
+}
+
+export function normalizeEntityDetailed(
+  raw: Record<string, unknown>,
+  opts: NormalizeOptions = {},
+): NormalizeResult {
   const now = opts.now ?? (() => new Date());
   const createdBy = opts.createdBy ?? 'ingest:web';
+  const strip = opts.stripUnknownRoots ?? false;
   const cleaned: Record<string, unknown> = {};
+  const aliased: string[] = [];
+  const stripped: string[] = [];
 
   for (const [k, v] of Object.entries(raw)) {
     if (ILLEGAL_KEY_ALIASES[k]) {
       cleaned[ILLEGAL_KEY_ALIASES[k]] = v;
+      aliased.push(k);
     } else {
       cleaned[k] = v;
     }
   }
 
+  if (opts.forceTenantId && opts.forceTenantId.trim()) {
+    cleaned.tenantId = opts.forceTenantId;
+  }
+
   for (const k of Object.keys(cleaned)) {
     if (!ROOT_FIELDS.has(k)) {
+      if (strip) {
+        delete cleaned[k];
+        stripped.push(k);
+        continue;
+      }
       throw new NormalizationError(
         `Illegal root field "${k}". Allowed: ${[...ROOT_FIELDS].join(', ')}`,
       );
@@ -107,15 +135,19 @@ export function normalizeEntity(
     typeof cb === 'string' && cb.length > 0 ? cb : createdBy;
 
   return {
-    id,
-    name: name.trim(),
-    type,
-    tenantId: tenantId.trim(),
-    lifecycle,
-    properties,
-    relationships,
-    markdown,
-    createdBy: createdByFinal,
+    entity: {
+      id,
+      name: name.trim(),
+      type,
+      tenantId: tenantId.trim(),
+      lifecycle,
+      properties,
+      relationships,
+      markdown,
+      createdBy: createdByFinal,
+    },
+    stripped,
+    aliased,
   };
 }
 
